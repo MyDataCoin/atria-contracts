@@ -1,0 +1,20 @@
+# Foundry
+out/
+cache/
+broadcast/
+docs/book/
+
+# Dependencies (lib/ is tracked as git submodules — see .gitmodules)
+node_modules/
+
+# Secrets — private keys and RPC credentials must never enter the repository
+.env
+.env.*
+!.env.example
+*.key
+keystore/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
