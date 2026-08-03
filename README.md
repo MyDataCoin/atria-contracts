@@ -76,6 +76,9 @@ forge fmt --check
 
 ## Развёртывание
 
+Пошаговый порядок: [`docs/deployment-runbook.md`](docs/deployment-runbook.md).
+Пакет и периметр аудита: [`docs/audit.md`](docs/audit.md).
+
 Параметры вынесены в переменные окружения, приватные ключи в репозиторий не попадают — см.
 [`.env.example`](.env.example). `.env` в `.gitignore`.
 
@@ -96,6 +99,13 @@ forge script script/Deploy.s.sol:Deploy \
 Скрипт разворачивает `IdentityRegistry`, `Allowlist` и токен, выдаёт роли ключам из `.env`,
 передаёт `DEFAULT_ADMIN_ROLE` мультисигу и отзывает права у деплойера. Владение белым списком
 переходит мультисигу, агентом остаётся сервисный ключ бэкенда.
+
+После развёртывания раскладка ключей проверяется по состоянию сети, а не по логу скрипта:
+
+```bash
+TOKEN_ADDRESS=0x... DEPLOYER_ADDRESS=0x... \
+  forge script script/CheckDeployment.s.sol:CheckDeployment --rpc-url bsc_testnet
+```
 
 Адреса из вывода скрипта заносятся в объект через `Property.SetTokenContract` и в
 [`deployments/README.md`](deployments/README.md).

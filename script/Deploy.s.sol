@@ -37,17 +37,24 @@ contract Deploy is Script {
         bytes32 propertyId;
     }
 
-    function run() external {
+    function run()
+        external
+        returns (IdentityRegistry registry, Allowlist allowlist, AtriaPropertyToken token)
+    {
         Config memory cfg = _config();
 
         vm.startBroadcast();
 
-        IdentityRegistry registry = cfg.existingRegistry == address(0)
+        // The broadcaster, not `msg.sender`: it is the account that actually signs the deployment,
+        // and it is the one that must end up holding nothing.
+        (, address deployer,) = vm.readCallers();
+
+        registry = cfg.existingRegistry == address(0)
             ? new IdentityRegistry(cfg.admin)
             : IdentityRegistry(cfg.existingRegistry);
 
-        Allowlist allowlist = _allowlist(cfg);
-        AtriaPropertyToken token = _token(cfg, address(allowlist));
+        allowlist = _allowlist(cfg);
+        token = _token(cfg, address(allowlist), deployer);
 
         vm.stopBroadcast();
 
@@ -87,9 +94,10 @@ contract Deploy is Script {
 
     /// @dev The deployer holds DEFAULT_ADMIN_ROLE only long enough to grant the operational roles,
     ///      then passes admin to the multisig and renounces its own. It keeps nothing.
-    function _token(Config memory cfg, address allowlist) internal returns (AtriaPropertyToken token) {
-        address deployer = msg.sender;
-
+    function _token(Config memory cfg, address allowlist, address deployer)
+        internal
+        returns (AtriaPropertyToken token)
+    {
         token = new AtriaPropertyToken(
             cfg.name, cfg.symbol, allowlist, cfg.maxSupply, cfg.propertyId, cfg.currency, deployer
         );

@@ -18,3 +18,6 @@ keystore/
 .DS_Store
 .idea/
 .vscode/
+
+# Foundry script artifacts (contain sender addresses and simulation state)
+broadcast/dry-run/
