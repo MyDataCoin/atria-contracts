@@ -28,7 +28,7 @@ contract AtriaPropertyTokenTest is Test {
     bytes32 internal constant REASON = bytes32("court-order-42");
 
     function setUp() public {
-        allowlist = new Allowlist();
+        allowlist = new Allowlist(address(this), address(0));
         token = new AtriaPropertyToken(
             "ATRIA Property Test", "ATRP-T1", address(allowlist), MAX_SUPPLY, PROPERTY_ID, "KGS", admin
         );
@@ -313,7 +313,7 @@ contract AtriaPropertyTokenTest is Test {
     }
 
     function test_onlyAdminManagesAllowlistPointerAndRoles() public {
-        Allowlist other = new Allowlist();
+        Allowlist other = new Allowlist(address(this), address(0));
         bytes32 role = token.DEFAULT_ADMIN_ROLE();
 
         _expectMissingRole(compliance, role);
@@ -363,5 +363,65 @@ contract AtriaPropertyTokenTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, account, role)
         );
+    }
+
+    // ── 2026-08-04 review: input validation on compliance and oracle actions ──
+
+    /// @notice S-8: shares must not be forced onto an address that cannot then move them.
+    function test_forcedTransferToAFrozenAddressReverts() public {
+        vm.prank(minter);
+        token.mint(alice, 10);
+
+        vm.startPrank(compliance);
+        token.freeze(bob, "sanctions-hit");
+
+        // The destination is allowlisted and the caller is entitled to act, but the transfer would
+        // strand the shares: bob can neither send nor receive once frozen.
+        vm.expectRevert(abi.encodeWithSelector(AtriaPropertyToken.AccountFrozen.selector, bob));
+        token.forcedTransfer(alice, bob, 5, "court-order");
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(alice), 10);
+        assertEq(token.balanceOf(bob), 0);
+    }
+
+    /// @notice S-10: unfreeze is symmetric with freeze about the zero address.
+    function test_unfreezeRejectsTheZeroAddress() public {
+        vm.prank(compliance);
+        vm.expectRevert(AtriaPropertyToken.ZeroAddress.selector);
+        token.unfreeze(address(0), "mistake");
+    }
+
+    /// @notice S-9: the collateral report is what a regulator reads as backing the issue, so it has
+    ///         to be a report rather than whatever the oracle key happened to send.
+    function test_collateralReportRejectsMeaninglessValues() public {
+        uint64 now_ = uint64(block.timestamp);
+
+        vm.startPrank(oracle);
+
+        // No document behind the report.
+        vm.expectRevert(AtriaPropertyToken.InvalidCollateralReport.selector);
+        token.reportCollateral(bytes32(0), 1_000_000, now_, "ipfs://report");
+
+        // The property is not worth nothing.
+        vm.expectRevert(AtriaPropertyToken.InvalidCollateralReport.selector);
+        token.reportCollateral(keccak256("doc"), 0, now_, "ipfs://report");
+
+        // An appraisal dated in the future has not been performed.
+        vm.expectRevert(AtriaPropertyToken.InvalidCollateralReport.selector);
+        token.reportCollateral(keccak256("doc"), 1_000_000, now_ + 1 days, "ipfs://report");
+
+        // And it must not cost unbounded gas to store or read back.
+        string memory tooLong = new string(token.MAX_COLLATERAL_URI_LENGTH() + 1);
+        vm.expectRevert(AtriaPropertyToken.InvalidCollateralReport.selector);
+        token.reportCollateral(keccak256("doc"), 1_000_000, now_, tooLong);
+
+        // A well-formed one still lands.
+        token.reportCollateral(keccak256("doc"), 1_000_000, now_, "ipfs://report");
+        vm.stopPrank();
+
+        (bytes32 dataHash, uint256 valuation,,,) = token.collateral();
+        assertEq(dataHash, keccak256("doc"));
+        assertEq(valuation, 1_000_000);
     }
 }

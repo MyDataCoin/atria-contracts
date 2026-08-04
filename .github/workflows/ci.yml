@@ -34,3 +34,34 @@ jobs:
 
       - name: Coverage summary
         run: forge coverage --report summary --no-match-coverage "(script|test)"
+
+  slither:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # slither.config.json has been in this repository since the scaffold, but nothing ever ran it:
+      # the pipeline built, tested and checked formatting, and the static analysis existed only as a
+      # config file. A configured analyser that is never invoked is not a control.
+      - name: Slither
+        uses: crytic/slither-action@v0.4.0
+        with:
+          slither-config: slither.config.json
+          fail-on: medium
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a key that was committed and later removed is still a leaked key.
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

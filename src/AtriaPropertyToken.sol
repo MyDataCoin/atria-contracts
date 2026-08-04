@@ -40,6 +40,10 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant ORACLE_ROLE = keccak256("ORACLE_ROLE");
 
+    /// @notice Upper bound on {CollateralReport.uri}, so one report cannot cost an unbounded amount
+    ///         of gas to write or to read back.
+    uint256 public constant MAX_COLLATERAL_URI_LENGTH = 512;
+
     /// @notice Verified collateral data reported by the oracle (draft Decree, §16).
     struct CollateralReport {
         bytes32 dataHash; // hash of the underlying collateral document package
@@ -85,6 +89,7 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     error InvalidMaxSupply();
     error ZeroAddress();
     error ZeroAmount();
+    error InvalidCollateralReport();
 
     /// @param name_               token name
     /// @param symbol_             token symbol
@@ -161,6 +166,9 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
 
     /// @notice Unblock a holder.
     function unfreeze(address account, bytes32 reason) external onlyRole(COMPLIANCE_ROLE) {
+        // Symmetric with {freeze}: an unfreeze of the zero address is a mistake in the caller, and
+        // silently emitting an event for it puts a meaningless entry in the compliance record.
+        if (account == address(0)) revert ZeroAddress();
         frozen[account] = false;
         emit AddressUnfrozen(account, reason);
     }
@@ -188,6 +196,10 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
         if (!allowlist.isAllowed(to)) revert NotAllowed(to);
+        // A frozen destination would receive shares it can never move — the enforcement succeeds on
+        // paper and strands the property. If the destination genuinely has to be a frozen address,
+        // unfreeze it first, which leaves a reason code in the record for why.
+        if (frozen[to]) revert AccountFrozen(to);
 
         _complianceOverride = true;
         _transfer(from, to, amount);
@@ -203,6 +215,15 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
         external
         onlyRole(ORACLE_ROLE)
     {
+        // This is the figure a regulator reads off the chain as what backs the issue, so it has to
+        // be a figure rather than whatever the caller happened to pass. An empty hash points at no
+        // document, a zero valuation states the property is worth nothing, and an appraisal dated in
+        // the future was not performed.
+        if (dataHash == bytes32(0)) revert InvalidCollateralReport();
+        if (valuation == 0) revert InvalidCollateralReport();
+        if (valuedAt == 0 || valuedAt > block.timestamp) revert InvalidCollateralReport();
+        if (bytes(uri).length > MAX_COLLATERAL_URI_LENGTH) revert InvalidCollateralReport();
+
         collateral = CollateralReport({
             dataHash: dataHash,
             valuation: valuation,

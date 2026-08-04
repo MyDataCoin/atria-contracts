@@ -16,6 +16,10 @@ import {IAllowlist} from "./interfaces/IAllowlist.sol";
 ///         decision to allow/revoke happen off-chain in ATRIA/Tessera; this contract reflects it.
 contract Allowlist is IAllowlist {
     address public owner;
+
+    /// @notice Address nominated to take over as {owner}; takes effect only on {acceptOwnership}.
+    address public pendingOwner;
+
     mapping(address => bool) public agents; // addresses permitted to modify the list
     mapping(address => bool) private _allowed;
 
@@ -23,6 +27,7 @@ contract Allowlist is IAllowlist {
     event Disallowed(address indexed account);
     event AgentSet(address indexed agent, bool enabled);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
 
     error NotAuthorized();
     error ZeroAddress();
@@ -32,11 +37,27 @@ contract Allowlist is IAllowlist {
         _;
     }
 
-    constructor() {
-        owner = msg.sender;
-        agents[msg.sender] = true;
-        emit OwnershipTransferred(address(0), msg.sender);
-        emit AgentSet(msg.sender, true);
+    /// @notice Deploys the list already owned by `owner_`, with `agent_` able to maintain it.
+    /// @dev Ownership is a constructor argument rather than `msg.sender` so the deploying key never
+    ///      owns the list, not even for the rest of the transaction. The alternative — deploy to
+    ///      self, then hand over — cannot work now that handover is two-step: the admin multisig
+    ///      would have to countersign, leaving the deployer as owner in the meantime and making
+    ///      "the deployer keeps nothing" false for however long that takes.
+    /// @param owner_ address that owns the list (the admin multisig).
+    /// @param agent_ address permitted to maintain it (the backend gateway's service key). Pass the
+    ///        zero address to grant none.
+    constructor(address owner_, address agent_) {
+        if (owner_ == address(0)) revert ZeroAddress();
+
+        owner = owner_;
+        agents[owner_] = true;
+        emit OwnershipTransferred(address(0), owner_);
+        emit AgentSet(owner_, true);
+
+        if (agent_ != address(0)) {
+            agents[agent_] = true;
+            emit AgentSet(agent_, true);
+        }
     }
 
     /// @notice Allow an address. Agent-gated. Idempotent.
@@ -64,18 +85,35 @@ contract Allowlist is IAllowlist {
         emit AgentSet(agent, enabled);
     }
 
+    /// @notice Step 1 of 2: nominate a new owner. Nothing changes until they accept.
+    /// @dev Two steps because ownership of this list is effectively control of every transfer the
+    ///      token permits. Handing it to an address in one call means a typo, or an address whose key
+    ///      exists on some other chain, permanently strands the list: no further agents, no further
+    ///      handovers. Making the recipient act proves the address is real and controlled first.
+    ///      Pass the zero address to cancel a pending handover.
     function transferOwnership(address newOwner) external {
         if (msg.sender != owner) revert NotAuthorized();
-        if (newOwner == address(0)) revert ZeroAddress();
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    /// @notice Step 2 of 2: the nominated address takes ownership.
+    /// @dev The outgoing owner's agent rights are dropped here, so a handover cannot silently leave
+    ///      the previous holder able to keep editing the list.
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner || msg.sender == address(0)) revert NotAuthorized();
+
         address previous = owner;
-        emit OwnershipTransferred(previous, newOwner);
-        // Revoke the outgoing owner's agent rights so a handover doesn't silently retain them.
+        emit OwnershipTransferred(previous, msg.sender);
+
         if (agents[previous]) {
             agents[previous] = false;
             emit AgentSet(previous, false);
         }
-        owner = newOwner;
-        agents[newOwner] = true;
-        emit AgentSet(newOwner, true);
+
+        owner = msg.sender;
+        pendingOwner = address(0);
+        agents[msg.sender] = true;
+        emit AgentSet(msg.sender, true);
     }
 }

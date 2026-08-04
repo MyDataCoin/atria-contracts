@@ -182,7 +182,7 @@ contract AtriaPropertyTokenInvariants is Test {
         vm.warp(1_800_000_000);
 
         vm.prank(ADMIN);
-        allowlist = new Allowlist();
+        allowlist = new Allowlist(ADMIN, address(0));
 
         token = new AtriaPropertyToken(
             "Atria Tower One", "ATO", address(allowlist), MAX_SUPPLY, bytes32("property-1"), "KGS", ADMIN

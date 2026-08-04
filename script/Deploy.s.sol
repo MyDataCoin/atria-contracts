@@ -13,8 +13,13 @@ import {AtriaPropertyToken} from "../src/AtriaPropertyToken.sol";
 ///
 /// @dev Order matters. The deployer temporarily holds DEFAULT_ADMIN_ROLE so it can grant the
 ///      operational roles in the same transaction batch, then grants admin to {ADMIN_ADDRESS} and
-///      renounces its own. Allowlist ownership moves the same way — `transferOwnership` also drops
-///      the outgoing owner's agent rights.
+///      renounces its own. The allowlist needs no such dance: its owner and agent are constructor
+///      arguments, so the deploying key never owns it at any point.
+///
+///      The role addresses are checked for separation BEFORE anything is broadcast — see
+///      {_requireRoleSeparation}. Deploying with, say, one address as both minter and compliance
+///      removes the property the whole design rests on, and finding that out afterwards means
+///      rotating keys on a live chain.
 ///
 ///      Usage (testnet):
 ///        forge script script/Deploy.s.sol:Deploy --rpc-url bsc_testnet --account atria-deployer \
@@ -79,17 +84,61 @@ contract Deploy is Script {
         cfg.currency = vm.envOr("COLLATERAL_CURRENCY", string("KGS"));
         cfg.maxSupply = vm.envUint("TOKEN_MAX_SUPPLY");
         cfg.propertyId = vm.envBytes32("PROPERTY_ID");
+
+        _requireRoleSeparation(cfg);
+    }
+
+    /// @dev The whole point of the role split is that no single key can both create shares and take
+    ///      them away. Nothing in the token enforces that — it is a property of who holds which role,
+    ///      decided here. Passing the same address twice compiles, deploys, and quietly produces a
+    ///      contract with the separation removed. CheckDeployment catches it, but only after the
+    ///      deployment exists on a public chain under a set of keys that has to be rotated to undo.
+    ///      Checking before `vm.startBroadcast` costs nothing and fails on the developer's machine.
+    function _requireRoleSeparation(Config memory cfg) internal pure {
+        require(cfg.admin != address(0), "ADMIN_ADDRESS is unset");
+        require(cfg.minter != address(0), "MINTER_ADDRESS is unset");
+        require(cfg.compliance != address(0), "COMPLIANCE_ADDRESS is unset");
+        require(cfg.pauser != address(0), "PAUSER_ADDRESS is unset");
+        require(cfg.oracle != address(0), "ORACLE_ADDRESS is unset");
+        require(cfg.allowlistAgent != address(0), "ALLOWLIST_AGENT_ADDRESS is unset");
+
+        // The pairing that matters: one key must never be able to mint and to burn/seize.
+        require(cfg.minter != cfg.compliance, "MINTER_ADDRESS == COMPLIANCE_ADDRESS");
+
+        // The admin multisig manages roles; holding an operational one as well means a single
+        // compromise grants both the power and the ability to grant itself more.
+        require(cfg.admin != cfg.minter, "ADMIN_ADDRESS == MINTER_ADDRESS");
+        require(cfg.admin != cfg.compliance, "ADMIN_ADDRESS == COMPLIANCE_ADDRESS");
+
+        // The oracle states what backs the issue; it must not also be able to move the shares.
+        require(cfg.oracle != cfg.minter, "ORACLE_ADDRESS == MINTER_ADDRESS");
+        require(cfg.oracle != cfg.compliance, "ORACLE_ADDRESS == COMPLIANCE_ADDRESS");
+
+        // The backend's allowlist key is an online service key — the most exposed of the set.
+        require(cfg.allowlistAgent != cfg.admin, "ALLOWLIST_AGENT_ADDRESS == ADMIN_ADDRESS");
+        require(cfg.allowlistAgent != cfg.minter, "ALLOWLIST_AGENT_ADDRESS == MINTER_ADDRESS");
+        require(cfg.allowlistAgent != cfg.compliance, "ALLOWLIST_AGENT_ADDRESS == COMPLIANCE_ADDRESS");
+
+        require(cfg.maxSupply > 0, "TOKEN_MAX_SUPPLY is zero");
     }
 
     /// @dev Reuses an existing list when configured, otherwise deploys one, points it at the
     ///      backend gateway's service key and hands ownership to the admin multisig —
     ///      `transferOwnership` drops the deployer's agent rights on the way out.
     function _allowlist(Config memory cfg) internal returns (Allowlist allowlist) {
-        if (cfg.existingAllowlist != address(0)) return Allowlist(cfg.existingAllowlist);
+        if (cfg.existingAllowlist != address(0)) {
+            // Reusing a list this script does not own: it cannot grant the backend gateway its agent
+            // rights, and staying silent about that leaves the gateway unable to allowlist anyone —
+            // which surfaces later as mints reverting for no visible reason. Say so here; the admin
+            // multisig has to call setAgent itself.
+            console2.log("NOTE reusing ALLOWLIST_ADDRESS - setAgent(ALLOWLIST_AGENT_ADDRESS) was NOT called.");
+            console2.log("     The allowlist owner must grant it before any mint can succeed.");
+            return Allowlist(cfg.existingAllowlist);
+        }
 
-        allowlist = new Allowlist();
-        allowlist.setAgent(cfg.allowlistAgent, true);
-        allowlist.transferOwnership(cfg.admin);
+        // Owner and agent are constructor arguments, so the deployer never owns the list at all —
+        // there is no window between "deployed" and "handed over" for it to be otherwise.
+        allowlist = new Allowlist(cfg.admin, cfg.allowlistAgent);
     }
 
     /// @dev The deployer holds DEFAULT_ADMIN_ROLE only long enough to grant the operational roles,

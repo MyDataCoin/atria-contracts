@@ -57,6 +57,9 @@ contract IdentityRegistry {
     ///         Solana program's registry `authority` signer.
     address public authority;
 
+    /// @notice Address nominated to take over as {authority}; takes effect only on {acceptAuthority}.
+    address public pendingAuthority;
+
     mapping(bytes32 => DidAnchor) private _anchors;
     mapping(bytes32 => IssuerRecord) private _issuers;
 
@@ -64,7 +67,15 @@ contract IdentityRegistry {
     event RootUpdated(bytes32 indexed didHash, bytes32 newRoot);
     event RevocationBumped(bytes32 indexed didHash, uint64 newEpoch, uint8 reason);
     event IssuerRegistered(bytes32 indexed issuerDidHash, bytes32 signingKey, bool active, string schemaUri);
+    /// @notice Emitted when an issuer is deactivated. Separate from {IssuerRegistered} so an indexer
+    ///         keying on "an issuer was registered" cannot mistake a revocation for one.
+    event IssuerDeactivated(bytes32 indexed issuerDidHash);
+    event AnchorReassigned(bytes32 indexed didHash, address indexed previousOwner, address indexed newOwner);
     event AuthorityTransferred(address indexed previousAuthority, address indexed newAuthority);
+    event AuthorityTransferStarted(address indexed currentAuthority, address indexed pendingAuthority);
+
+    /// @notice Revocation reason emitted when an anchor changes hands. Opaque to this contract.
+    uint8 public constant REASON_CONTROLLER_CHANGED = 1;
 
     error AlreadyRegistered();
     error NotRegistered();
@@ -89,13 +100,28 @@ contract IdentityRegistry {
 
     // ── DID anchors ──────────────────────────────────────────────────────────
 
-    /// @notice Create a new DID anchor, binding it to the `controller` who proved control of the DID
-    ///         by signing the registration. Because `didHash` is public, anyone could otherwise
-    ///         front-run / squat a DID and have the off-chain verifier trust their root; requiring a
-    ///         controller signature ensures only the DID controller can create the anchor, and the
-    ///         transaction may be relayed by any sender (the controller need not pay gas).
-    ///         The `controller` becomes the anchor `owner`; updateRoot / bumpRevocation stay owner-gated.
-    ///         Mirrors Solana `register_did`.
+    /// @notice Create a new DID anchor, binding it to `controller`.
+    ///
+    /// @dev AUTHORITY-GATED. The controller signature alone cannot decide who owns a DID, and an
+    ///      earlier revision of this contract believed it could. The signature proves that the key
+    ///      named as `controller` signed this payload — it proves nothing about that key's relation
+    ///      to `didHash`. Anyone could therefore generate a fresh keypair, sign over SOMEONE ELSE'S
+    ///      didHash, and register first. Because `exists` is permanent and there was no
+    ///      re-assignment path, the rightful controller was then locked out forever (`updateRoot`
+    ///      reverts with `NotOwner`) and the registry permanently served an attacker-chosen root for
+    ///      that DID. `didHash` is SHA-256 of a public identifier, so the targets were enumerable,
+    ///      and the backend's own registration could simply be front-run in the mempool.
+    ///
+    ///      Binding didHash to the key (did:pkh style) would also close it, but ATRIA's DIDs are not
+    ///      key-derived — they come from the backend's identity layer — so the registrar has to be
+    ///      the party that knows which key belongs to which DID. That is the authority.
+    ///
+    ///      The controller signature is KEPT as a second factor: the authority cannot unilaterally
+    ///      anchor a DID to a key that did not consent, and the transaction may still be relayed
+    ///      (the controller need not hold gas).
+    ///
+    ///      The `controller` becomes the anchor `owner`; updateRoot / bumpRevocation stay owner-gated.
+    ///      Mirrors Solana `register_did`.
     /// @param didHash          SHA-256(utf8(did)) — the chain-agnostic DID hash.
     /// @param attestationRoot  32-byte Merkle root of the holder's attestation bundle.
     /// @param controller       address whose key controls the DID; becomes the anchor owner.
@@ -108,7 +134,7 @@ contract IdentityRegistry {
         bytes32 attestationRoot,
         address controller,
         bytes calldata signature
-    ) external {
+    ) external onlyAuthority {
         if (controller == address(0)) revert ZeroController();
 
         DidAnchor storage a = _anchors[didHash];
@@ -184,6 +210,40 @@ contract IdentityRegistry {
         emit RevocationBumped(didHash, a.revocationEpoch, reason);
     }
 
+    /// @notice Move an existing anchor to a new controller. Authority-gated.
+    /// @dev A recovery path, because `exists` is permanent and everything else about an anchor is
+    ///      owner-gated: a lost controller key, or a key that has to be rotated after a compromise,
+    ///      would otherwise strand the DID with no way to publish a new root. Requires the incoming
+    ///      controller's signature for the same reason {registerDid} does — the authority may move
+    ///      an anchor, but not onto a key that has not agreed to hold it.
+    /// @param didHash       the anchor to move.
+    /// @param newController address that will own the anchor from now on.
+    /// @param signature     65-byte ECDSA signature by `newController`, shaped as in {registerDid}
+    ///                      but over the anchor's CURRENT root, so an old signature cannot be reused.
+    function reassignAnchor(bytes32 didHash, address newController, bytes calldata signature)
+        external
+        onlyAuthority
+    {
+        if (newController == address(0)) revert ZeroController();
+
+        DidAnchor storage a = _anchors[didHash];
+        if (!a.exists) revert NotRegistered();
+
+        bytes32 structHash = keccak256(abi.encode(didHash, a.attestationRoot, block.chainid, address(this)));
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));
+        if (_recover(digest, signature) != newController) revert InvalidSignature();
+
+        address previous = a.owner;
+        a.owner = newController;
+        a.updatedAt = uint64(block.timestamp);
+
+        // Presentations made under the old controller are no longer current.
+        a.revocationEpoch += 1;
+
+        emit AnchorReassigned(didHash, previous, newController);
+        emit RevocationBumped(didHash, a.revocationEpoch, REASON_CONTROLLER_CHANGED);
+    }
+
     // ── Issuer registry ──────────────────────────────────────────────────────
 
     /// @notice Register (or re-register) an issuer. Authority-gated.
@@ -216,7 +276,7 @@ contract IdentityRegistry {
         IssuerRecord storage i = _issuers[issuerDidHash];
         if (!i.exists) revert NotRegistered();
         i.active = false;
-        emit IssuerRegistered(issuerDidHash, i.signingKey, false, i.schemaUri);
+        emit IssuerDeactivated(issuerDidHash);
     }
 
     // ── Reads (flat tuples for robust off-chain ABI decoding) ─────────────────
@@ -250,10 +310,24 @@ contract IdentityRegistry {
 
     // ── Admin ────────────────────────────────────────────────────────────────
 
-    /// @notice Transfer the issuer-registry authority to a new address.
+    /// @notice Step 1 of 2: nominate a new authority. Nothing changes until it accepts.
+    /// @dev Two steps because the authority is the only role that can register or move anchors and
+    ///      register issuers. A single-step handover hands all of that to whatever address was typed;
+    ///      one wrong character, or an address on a chain where nobody holds the key, and the
+    ///      registry can never register another issuer or recover another anchor. Requiring the
+    ///      recipient to act proves the address is real and controlled before it means anything.
+    ///      Pass the zero address to cancel a pending handover.
     function transferAuthority(address newAuthority) external onlyAuthority {
-        if (newAuthority == address(0)) revert ZeroAuthority();
-        emit AuthorityTransferred(authority, newAuthority);
-        authority = newAuthority;
+        pendingAuthority = newAuthority;
+        emit AuthorityTransferStarted(authority, newAuthority);
+    }
+
+    /// @notice Step 2 of 2: the nominated address takes the authority.
+    function acceptAuthority() external {
+        if (msg.sender != pendingAuthority || msg.sender == address(0)) revert NotAuthority();
+
+        emit AuthorityTransferred(authority, msg.sender);
+        authority = msg.sender;
+        pendingAuthority = address(0);
     }
 }
