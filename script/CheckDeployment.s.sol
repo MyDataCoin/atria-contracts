@@ -33,12 +33,12 @@ contract CheckDeployment is Script {
         address agent = vm.envAddress("ALLOWLIST_AGENT_ADDRESS");
         address deployer = vm.envOr("DEPLOYER_ADDRESS", address(0));
 
-        ok = _check("decimals == 2", token.decimals() == 2) && ok;
-        // TOKEN_MAX_SUPPLY is in shares, `maxSupply` in minor units — see Deploy._config.
-        ok = _check(
-            "maxSupply == TOKEN_MAX_SUPPLY",
-            token.maxSupply() == vm.envUint("TOKEN_MAX_SUPPLY") * 10 ** token.decimals()
-        ) && ok;
+        ok = _check("decimals == 0", token.decimals() == 0) && ok;
+        // Shares are indivisible, so TOKEN_MAX_SUPPLY and `maxSupply` are the same number and
+        // nothing is scaled — see Deploy._config. Keeping the old ×10**decimals here would be a
+        // no-op today and would silently start lying again the moment decimals ever moved.
+        ok = _check("maxSupply == TOKEN_MAX_SUPPLY", token.maxSupply() == vm.envUint("TOKEN_MAX_SUPPLY"))
+            && ok;
         ok = _check("propertyId matches", token.propertyId() == vm.envBytes32("PROPERTY_ID")) && ok;
 
         ok = _check("admin holds DEFAULT_ADMIN_ROLE", token.hasRole(token.DEFAULT_ADMIN_ROLE(), admin)) && ok;

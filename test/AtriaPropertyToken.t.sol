@@ -50,29 +50,30 @@ contract AtriaPropertyTokenTest is Test {
         token.mint(to, amount);
     }
 
-    // ── Divisibility ─────────────────────────────────────────────────────────
+    // ── Indivisibility ───────────────────────────────────────────────────────
 
-    /// @dev Two decimals, not the ERC-20 default of 18: the backend registry stores holdings at the
-    ///      same scale, and a mismatch would make the register and the chain describe different
-    ///      holdings.
-    function test_decimalsIsTwo() public view {
-        assertEq(token.decimals(), 2);
+    /// @dev Zero decimals, not the ERC-20 default of 18 and not hundredths: the backend registry
+    ///      counts holdings as whole numbers at the same scale, and a mismatch would make the
+    ///      register and the chain describe different holdings.
+    function test_decimalsIsZero() public view {
+        assertEq(token.decimals(), 0);
     }
 
-    /// @dev A balance is an integer of minor units: 57.55 shares is 5755 units, and the smallest
-    ///      representable holding is one unit — a hundredth of a share.
-    function test_oneUnitIsOneHundredthOfAShare() public {
+    /// @dev A balance is a whole number of shares, and the smallest holding is one of them.
+    function test_theSmallestHoldingIsOneWholeShare() public {
         _mint(alice, 1);
         assertEq(token.balanceOf(alice), 1);
         assertEq(token.totalSupply(), 1);
     }
 
-    /// @dev The case the divisibility exists for: an issue sized to a 57.55 m² apartment. Both the
-    ///      cap and the balance are minor units, so 57.55 shares is 5755 of them — which is also
-    ///      why a deployment's maxSupply has to be given in minor units, not in whole shares.
-    function test_fractionalIssueIsRepresentable() public {
+    /// @dev The case indivisibility is FOR. A 57.55 m² flat is not a 57.55-share issue: sized that
+    ///      way, a share costs what a metre costs and any smaller purchase is a fraction that
+    ///      cannot be minted. The same flat is cut into a number of shares that makes the unit
+    ///      price small, and the area becomes a derived equivalent rather than the unit itself.
+    function test_anIssueIsCutIntoSharesNotSquareMetres() public {
+        // 83 400 KGS of flat at 100 KGS a share.
         AtriaPropertyToken flat = new AtriaPropertyToken(
-            "ATRIA Borsan Flat 1", "ATRP-B1", address(allowlist), 5755, PROPERTY_ID, "KGS", admin
+            "ATRIA Borsan Flat 1", "ATRP-B1", address(allowlist), 834, PROPERTY_ID, "KGS", admin
         );
         // MINTER_ROLE() is itself a call, so it would eat a single vm.prank before grantRole runs.
         bytes32 minterRole = flat.MINTER_ROLE();
@@ -80,10 +81,22 @@ contract AtriaPropertyTokenTest is Test {
         flat.grantRole(minterRole, minter);
 
         vm.prank(minter);
-        flat.mint(alice, 5755);
+        flat.mint(alice, 834);
 
-        assertEq(flat.balanceOf(alice), 5755, "57.55 shares held to the last hundredth");
+        assertEq(flat.balanceOf(alice), 834, "the whole issue held as whole shares");
         assertEq(flat.remainingSupply(), 0, "the issue closes exactly, with no dust left over");
+    }
+
+    /// @dev The cap is a share count, not a scaled one. A deployment that still multiplied by a
+    ///      hundred — as the hundredths-era script did — would register an issue a hundred times
+    ///      the size, and the mistake would only show up as shares that should not exist.
+    function test_theCapIsAShareCountAndIsNotScaled() public {
+        AtriaPropertyToken flat = new AtriaPropertyToken(
+            "ATRIA Borsan Flat 2", "ATRP-B2", address(allowlist), 834, PROPERTY_ID, "KGS", admin
+        );
+
+        assertEq(flat.maxSupply(), 834);
+        assertEq(flat.remainingSupply(), 834);
     }
 
     // ── Allowlist ────────────────────────────────────────────────────────────

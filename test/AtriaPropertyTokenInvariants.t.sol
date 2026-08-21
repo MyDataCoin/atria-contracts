@@ -238,8 +238,10 @@ contract AtriaPropertyTokenInvariants is Test {
     }
 
     /// @notice Shares are indivisible, always.
+    /// @dev    `decimals()` is what the backend's TokenAmount.Scale mirrors. If this ever moved, the
+    ///         register would keep counting whole shares while the chain counted something else.
     function invariant_sharesStayIndivisible() public view {
-        assertEq(token.decimals(), 2);
+        assertEq(token.decimals(), 0);
     }
 
     /// @notice A frozen holder's shares stay exactly where they are.

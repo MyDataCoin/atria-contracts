@@ -121,9 +121,11 @@ contract DeployTest is Test {
     function test_tokenParametersMatchTheIssue() public view {
         assertEq(token.name(), "ATRIA Property Test");
         assertEq(token.symbol(), "ATRP-T1");
-        assertEq(token.decimals(), 2);
-        // TOKEN_MAX_SUPPLY is a share count; the cap is compared against a minor-unit total supply.
-        assertEq(token.maxSupply(), MAX_SUPPLY * 100);
+        assertEq(token.decimals(), 0);
+        // TOKEN_MAX_SUPPLY is a share count and shares are indivisible, so the cap IS that number.
+        // The script used to multiply by a hundred for the hundredths-era token; doing that now
+        // would register an issue a hundred times the size the backend thinks it placed.
+        assertEq(token.maxSupply(), MAX_SUPPLY);
         assertEq(token.maxSupply(), MAX_SUPPLY * 10 ** token.decimals());
         assertEq(token.totalSupply(), 0);
         assertEq(token.propertyId(), PROPERTY_ID);

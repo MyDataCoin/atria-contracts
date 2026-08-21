@@ -14,9 +14,11 @@ import {IAllowlist} from "./interfaces/IAllowlist.sol";
 ///         transfer, plus intake of verified collateral data.
 ///
 ///         Deliberate differences from the reference token:
-///           - `decimals = 2` — a share is divisible into hundredths, so an issue can be sized to
-///             something real (57.55 shares for a 57.55 m² apartment) and an investor can hold a
-///             part of one. Balances are integer minor units: 57.55 shares is 5755 units;
+///           - `decimals = 0` — a share is indivisible. The token is a share of the ISSUE, not a
+///             square metre: sizing an issue by area forces the unit price up to the price of a
+///             metre, and every purchase under that price then has to be a fraction the contract
+///             cannot mint. An issue is instead cut into enough shares that the unit price is small
+///             against the minimum entry, and area is shown as a derived equivalent;
 ///           - a hard `maxSupply` cap matching the registered issue size, decreasable only when
 ///             part of the issue is annulled;
 ///           - role separation instead of a single `owner` — see below;
@@ -62,9 +64,9 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     /// @notice ISO code of the currency {CollateralReport.valuation} is denominated in.
     string public collateralCurrency;
 
-    /// @notice Hard cap on total supply — the registered issue size, in minor units (hundredths of a
-    ///         share), the same unit as {totalSupply} and every balance. 1 000 000 shares is
-    ///         100 000 000 here. The deployment script converts from shares.
+    /// @notice Hard cap on total supply — the registered issue size in whole shares, the same unit
+    ///         as {totalSupply} and every balance. Shares are indivisible ({decimals} is zero), so
+    ///         1 000 000 shares is 1 000 000 here and nothing is scaled anywhere.
     uint256 public maxSupply;
 
     /// @notice Transfer-restriction registry consulted on every mint and transfer.
@@ -100,7 +102,7 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     /// @param name_               token name
     /// @param symbol_             token symbol
     /// @param allowlist_          transfer-restriction registry
-    /// @param maxSupply_          registered issue size, in minor units (see {maxSupply})
+    /// @param maxSupply_          registered issue size, in whole shares (see {maxSupply})
     /// @param propertyId_         backend `Property.Id`
     /// @param collateralCurrency_ ISO code the collateral valuation is denominated in
     /// @param admin               DEFAULT_ADMIN_ROLE holder — a multisig, not the deployer EOA.
@@ -131,12 +133,12 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
         emit AllowlistChanged(allowlist_);
     }
 
-    /// @notice A share is divisible into hundredths: the smallest tradable unit is 0.01 of a share.
-    ///         This is deliberately NOT the ERC-20 default of 18 — the backend registry stores
-    ///         holdings as decimals with the same scale (`TokenAmount.Scale`), and the two must
+    /// @notice A share does not divide: the smallest holding is one whole token.
+    ///         This is deliberately NOT the ERC-20 default of 18 — the backend registry counts
+    ///         holdings as whole numbers at the same scale (`TokenAmount.Scale`), and the two must
     ///         agree exactly or the register and the chain describe different holdings.
     function decimals() public pure override returns (uint8) {
-        return 2;
+        return 0;
     }
 
     /// @notice Shares still issuable under the registered issue size.
