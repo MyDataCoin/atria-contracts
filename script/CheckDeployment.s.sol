@@ -34,12 +34,14 @@ contract CheckDeployment is Script {
         address deployer = vm.envOr("DEPLOYER_ADDRESS", address(0));
 
         ok = _check("decimals == 2", token.decimals() == 2) && ok;
-        ok = _check("maxSupply == TOKEN_MAX_SUPPLY", token.maxSupply() == vm.envUint("TOKEN_MAX_SUPPLY")) && ok;
+        ok = _check("maxSupply == TOKEN_MAX_SUPPLY", token.maxSupply() == vm.envUint("TOKEN_MAX_SUPPLY"))
+            && ok;
         ok = _check("propertyId matches", token.propertyId() == vm.envBytes32("PROPERTY_ID")) && ok;
 
         ok = _check("admin holds DEFAULT_ADMIN_ROLE", token.hasRole(token.DEFAULT_ADMIN_ROLE(), admin)) && ok;
         ok = _check("minter holds MINTER_ROLE", token.hasRole(token.MINTER_ROLE(), minter)) && ok;
-        ok = _check("compliance holds COMPLIANCE_ROLE", token.hasRole(token.COMPLIANCE_ROLE(), compliance)) && ok;
+        ok = _check("compliance holds COMPLIANCE_ROLE", token.hasRole(token.COMPLIANCE_ROLE(), compliance))
+            && ok;
         ok = _check("pauser holds PAUSER_ROLE", token.hasRole(token.PAUSER_ROLE(), pauser)) && ok;
         ok = _check("oracle holds ORACLE_ROLE", token.hasRole(token.ORACLE_ROLE(), oracle)) && ok;
 
@@ -53,9 +55,12 @@ contract CheckDeployment is Script {
         ok = _check("backend agent can maintain the allowlist", allowlist.agents(agent)) && ok;
 
         if (deployer != address(0)) {
-            ok = _check("deployer holds no admin role", !token.hasRole(token.DEFAULT_ADMIN_ROLE(), deployer)) && ok;
+            ok = _check("deployer holds no admin role", !token.hasRole(token.DEFAULT_ADMIN_ROLE(), deployer))
+                && ok;
             ok = _check("deployer holds no minter role", !token.hasRole(token.MINTER_ROLE(), deployer)) && ok;
-            ok = _check("deployer holds no compliance role", !token.hasRole(token.COMPLIANCE_ROLE(), deployer)) && ok;
+            ok = _check(
+                    "deployer holds no compliance role", !token.hasRole(token.COMPLIANCE_ROLE(), deployer)
+                ) && ok;
             ok = _check("deployer holds no pauser role", !token.hasRole(token.PAUSER_ROLE(), deployer)) && ok;
             ok = _check("deployer holds no oracle role", !token.hasRole(token.ORACLE_ROLE(), deployer)) && ok;
             ok = _check("deployer is not an allowlist agent", !allowlist.agents(deployer)) && ok;

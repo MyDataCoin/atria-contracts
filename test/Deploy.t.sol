@@ -71,10 +71,14 @@ contract DeployTest is Test {
     function test_deployRefusesAWordThatIsNotAPropertyId() public {
         DeployHarness harness = new DeployHarness();
 
-        vm.expectRevert(bytes("PROPERTY_ID is not a Property.Id (expected the guid left-aligned, zero-padded)"));
+        vm.expectRevert(
+            bytes("PROPERTY_ID is not a Property.Id (expected the guid left-aligned, zero-padded)")
+        );
         harness.requireIssueIdentity(bytes32(uint256(1)));
 
-        vm.expectRevert(bytes("PROPERTY_ID is not a Property.Id (expected the guid left-aligned, zero-padded)"));
+        vm.expectRevert(
+            bytes("PROPERTY_ID is not a Property.Id (expected the guid left-aligned, zero-padded)")
+        );
         harness.requireIssueIdentity(keccak256("property-testnet-1"));
     }
 
