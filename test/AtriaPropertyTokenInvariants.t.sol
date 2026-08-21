@@ -239,7 +239,7 @@ contract AtriaPropertyTokenInvariants is Test {
 
     /// @notice Shares are indivisible, always.
     function invariant_sharesStayIndivisible() public view {
-        assertEq(token.decimals(), 0);
+        assertEq(token.decimals(), 2);
     }
 
     /// @notice A frozen holder's shares stay exactly where they are.

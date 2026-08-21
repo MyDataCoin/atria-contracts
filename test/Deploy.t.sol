@@ -19,7 +19,10 @@ contract DeployTest is Test {
     address internal agent = makeAddr("backendAllowlistAgent");
 
     uint256 internal constant MAX_SUPPLY = 250_000;
-    bytes32 internal constant PROPERTY_ID = keccak256("property-testnet-1");
+    /// @dev The shape the backend hands over as `propertyIdBytes32`: a `Property.Id` guid
+    ///      left-aligned in the word and zero-padded on the right.
+    bytes32 internal constant PROPERTY_ID =
+        0x3f8d90012b4c4d6e8a10c0ffee00123400000000000000000000000000000000;
 
     IdentityRegistry internal registry;
     Allowlist internal allowlist;
@@ -45,6 +48,34 @@ contract DeployTest is Test {
         // not allowed, so that address stands in for the deployer key.
         deployer = DEFAULT_SENDER;
         (registry, allowlist, token) = new Deploy().run();
+    }
+
+    /// @notice Deploying without the issue id has to fail on the developer's machine: afterwards the
+    ///         address may already be published, and the id can only be changed by deploying again.
+    /// @notice Deploying without the issue id has to fail on the developer's machine: afterwards the
+    ///         address may already be published, and the id can only be changed by deploying again.
+    /// @dev Exercised through the harness rather than by emptying `PROPERTY_ID` in the environment —
+    ///      the environment belongs to the process, so a test that empties it fails whichever test
+    ///      runs next instead of this one.
+    function test_deployRefusesAnEmptyPropertyId() public {
+        DeployHarness harness = new DeployHarness();
+
+        harness.requireIssueIdentity(PROPERTY_ID);
+
+        vm.expectRevert(bytes("PROPERTY_ID is unset (backend: propertyIdBytes32)"));
+        harness.requireIssueIdentity(bytes32(0));
+    }
+
+    /// @notice The placeholder that is not zero is the one that gets deployed: `0x…01`, or a hash of
+    ///         something convenient. Neither is an id the backend can bind the contract by.
+    function test_deployRefusesAWordThatIsNotAPropertyId() public {
+        DeployHarness harness = new DeployHarness();
+
+        vm.expectRevert(bytes("PROPERTY_ID is not a Property.Id (expected the guid left-aligned, zero-padded)"));
+        harness.requireIssueIdentity(bytes32(uint256(1)));
+
+        vm.expectRevert(bytes("PROPERTY_ID is not a Property.Id (expected the guid left-aligned, zero-padded)"));
+        harness.requireIssueIdentity(keccak256("property-testnet-1"));
     }
 
     function test_deployerKeepsNothing() public view {
@@ -86,7 +117,7 @@ contract DeployTest is Test {
     function test_tokenParametersMatchTheIssue() public view {
         assertEq(token.name(), "ATRIA Property Test");
         assertEq(token.symbol(), "ATRP-T1");
-        assertEq(token.decimals(), 0);
+        assertEq(token.decimals(), 2);
         assertEq(token.maxSupply(), MAX_SUPPLY);
         assertEq(token.totalSupply(), 0);
         assertEq(token.propertyId(), PROPERTY_ID);
@@ -119,5 +150,12 @@ contract DeployTest is Test {
         assertEq(address(allowlist2), address(allowlist));
         assertEq(address(registry2), address(registry));
         assertTrue(address(token2) != address(token));
+    }
+}
+
+/// @dev Reaches the script's pre-broadcast checks without going through the environment.
+contract DeployHarness is Deploy {
+    function requireIssueIdentity(bytes32 propertyId) external pure {
+        _requireIssueIdentity(propertyId);
     }
 }

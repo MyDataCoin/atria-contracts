@@ -83,8 +83,9 @@ contract Deploy is Script {
         cfg.symbol = vm.envString("TOKEN_SYMBOL");
         cfg.currency = vm.envOr("COLLATERAL_CURRENCY", string("KGS"));
         cfg.maxSupply = vm.envUint("TOKEN_MAX_SUPPLY");
-        cfg.propertyId = vm.envBytes32("PROPERTY_ID");
+        cfg.propertyId = vm.envOr("PROPERTY_ID", bytes32(0));
 
+        _requireIssueIdentity(cfg.propertyId);
         _requireRoleSeparation(cfg);
     }
 
@@ -94,6 +95,25 @@ contract Deploy is Script {
     ///      contract with the separation removed. CheckDeployment catches it, but only after the
     ///      deployment exists on a public chain under a set of keys that has to be rotated to undo.
     ///      Checking before `vm.startBroadcast` costs nothing and fails on the developer's machine.
+    /// @dev Which issue this token represents is decided before it exists: the constructor stores it
+    ///      immutably and rejects an empty value, so an unset PROPERTY_ID is not a setting to fix
+    ///      afterwards but a second deployment — by which time the address may already be published.
+    ///      The value comes from the backend as `propertyIdBytes32`
+    ///      (`GET /api/v1/properties/{id}/token-contract`); converting the guid by hand invites the
+    ///      one mistake this cannot recover from.
+    function _requireIssueIdentity(bytes32 propertyId) internal pure {
+        require(propertyId != bytes32(0), "PROPERTY_ID is unset (backend: propertyIdBytes32)");
+
+        // A `Property.Id` is a 16-byte guid left-aligned in the word, so the lower half is zero. A
+        // word that fails this is not an id from the database but something invented locally — a
+        // hash, a hand-typed placeholder, `0x…01`. The backend refuses to bind such a contract, so
+        // catching it here is the difference between a failed command and a wasted deployment.
+        require(
+            uint256(propertyId) & type(uint128).max == 0,
+            "PROPERTY_ID is not a Property.Id (expected the guid left-aligned, zero-padded)"
+        );
+    }
+
     function _requireRoleSeparation(Config memory cfg) internal pure {
         require(cfg.admin != address(0), "ADMIN_ADDRESS is unset");
         require(cfg.minter != address(0), "MINTER_ADDRESS is unset");

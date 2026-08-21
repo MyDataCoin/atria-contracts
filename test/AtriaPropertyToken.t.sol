@@ -50,18 +50,40 @@ contract AtriaPropertyTokenTest is Test {
         token.mint(to, amount);
     }
 
-    // ── Indivisibility ───────────────────────────────────────────────────────
+    // ── Divisibility ─────────────────────────────────────────────────────────
 
-    function test_decimalsIsZero() public view {
-        assertEq(token.decimals(), 0);
+    /// @dev Two decimals, not the ERC-20 default of 18: the backend registry stores holdings at the
+    ///      same scale, and a mismatch would make the register and the chain describe different
+    ///      holdings.
+    function test_decimalsIsTwo() public view {
+        assertEq(token.decimals(), 2);
     }
 
-    /// @dev With decimals = 0 the smallest representable amount is one whole share: a "half share"
-    ///      has no on-chain representation at all, and 1 unit is exactly 1 share.
-    function test_oneUnitIsOneWholeShare() public {
+    /// @dev A balance is an integer of minor units: 57.55 shares is 5755 units, and the smallest
+    ///      representable holding is one unit — a hundredth of a share.
+    function test_oneUnitIsOneHundredthOfAShare() public {
         _mint(alice, 1);
         assertEq(token.balanceOf(alice), 1);
         assertEq(token.totalSupply(), 1);
+    }
+
+    /// @dev The case the divisibility exists for: an issue sized to a 57.55 m² apartment. Both the
+    ///      cap and the balance are minor units, so 57.55 shares is 5755 of them — which is also
+    ///      why a deployment's maxSupply has to be given in minor units, not in whole shares.
+    function test_fractionalIssueIsRepresentable() public {
+        AtriaPropertyToken flat = new AtriaPropertyToken(
+            "ATRIA Borsan Flat 1", "ATRP-B1", address(allowlist), 5755, PROPERTY_ID, "KGS", admin
+        );
+        // MINTER_ROLE() is itself a call, so it would eat a single vm.prank before grantRole runs.
+        bytes32 minterRole = flat.MINTER_ROLE();
+        vm.prank(admin);
+        flat.grantRole(minterRole, minter);
+
+        vm.prank(minter);
+        flat.mint(alice, 5755);
+
+        assertEq(flat.balanceOf(alice), 5755, "57.55 shares held to the last hundredth");
+        assertEq(flat.remainingSupply(), 0, "the issue closes exactly, with no dust left over");
     }
 
     // ── Allowlist ────────────────────────────────────────────────────────────
@@ -357,6 +379,16 @@ contract AtriaPropertyTokenTest is Test {
     function test_propertyIdAndCurrencyAreExposed() public view {
         assertEq(token.propertyId(), PROPERTY_ID);
         assertEq(token.collateralCurrency(), "KGS");
+    }
+
+    /// @notice The id is immutable, so an empty one cannot be repaired after the fact: a token that
+    ///         does not name its issue is an anonymous ERC-20 the backend can only claim belongs to a
+    ///         property, and the register would reconcile against it just as happily either way.
+    function test_constructorRejectsAnEmptyPropertyId() public {
+        vm.expectRevert(AtriaPropertyToken.InvalidPropertyId.selector);
+        new AtriaPropertyToken(
+            "ATRIA Property Test", "ATRP-T1", address(allowlist), MAX_SUPPLY, bytes32(0), "KGS", admin
+        );
     }
 
     function _expectMissingRole(address account, bytes32 role) internal {

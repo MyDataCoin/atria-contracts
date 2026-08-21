@@ -1,0 +1,17 @@
+# Gitleaks configuration.
+#
+# Extends the stock ruleset rather than replacing it — an allowlist that also drops every default
+# rule is not an allowlist, it is a disabled scanner.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public on-chain identifiers"
+
+# EVM contract and wallet addresses. The `generic-api-key` rule matches them because they are long
+# hex strings, but they are public by construction: a deployed contract's address is what callers
+# use to reach it and it is printed on every block explorer. Nothing is disclosed by having them
+# in the repository, and deploy scripts and fixtures have to name them somewhere.
+regexes = [
+  '''0x[a-fA-F0-9]{40}''',
+]

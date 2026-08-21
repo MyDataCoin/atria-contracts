@@ -14,7 +14,9 @@ import {IAllowlist} from "./interfaces/IAllowlist.sol";
 ///         transfer, plus intake of verified collateral data.
 ///
 ///         Deliberate differences from the reference token:
-///           - `decimals = 0` — a share is indivisible, minimums are expressed in whole shares;
+///           - `decimals = 2` — a share is divisible into hundredths, so an issue can be sized to
+///             something real (57.55 shares for a 57.55 m² apartment) and an investor can hold a
+///             part of one. Balances are integer minor units: 57.55 shares is 5755 units;
 ///           - a hard `maxSupply` cap matching the registered issue size, decreasable only when
 ///             part of the issue is annulled;
 ///           - role separation instead of a single `owner` — see below;
@@ -53,7 +55,8 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
         string uri; // pointer to the off-chain report
     }
 
-    /// @notice `Property.Id` from the backend, so the issue is identifiable on-chain.
+    /// @notice `Property.Id` from the backend, so the issue is identifiable on-chain. Immutable:
+    ///         which issue a contract represents is decided at deployment and never afterwards.
     bytes32 public immutable propertyId;
 
     /// @notice ISO code of the currency {CollateralReport.valuation} is denominated in.
@@ -87,6 +90,7 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     error AccountFrozen(address account);
     error SupplyCapExceeded(uint256 requested, uint256 available);
     error InvalidMaxSupply();
+    error InvalidPropertyId();
     error ZeroAddress();
     error ZeroAmount();
     error InvalidCollateralReport();
@@ -111,6 +115,10 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     ) ERC20(name_, symbol_) {
         if (allowlist_ == address(0) || admin == address(0)) revert ZeroAddress();
         if (maxSupply_ == 0) revert InvalidMaxSupply();
+        // A token that does not name its issue is an anonymous ERC-20 the backend can only claim
+        // belongs to a property. The value is immutable, so a deployment that leaves it empty cannot
+        // be repaired — it can only be replaced, and by then the address may already be published.
+        if (propertyId_ == bytes32(0)) revert InvalidPropertyId();
 
         allowlist = IAllowlist(allowlist_);
         maxSupply = maxSupply_;
@@ -121,9 +129,12 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
         emit AllowlistChanged(allowlist_);
     }
 
-    /// @notice A share is indivisible: the minimum tradable unit is one whole share.
+    /// @notice A share is divisible into hundredths: the smallest tradable unit is 0.01 of a share.
+    ///         This is deliberately NOT the ERC-20 default of 18 — the backend registry stores
+    ///         holdings as decimals with the same scale (`TokenAmount.Scale`), and the two must
+    ///         agree exactly or the register and the chain describe different holdings.
     function decimals() public pure override returns (uint8) {
-        return 0;
+        return 2;
     }
 
     /// @notice Shares still issuable under the registered issue size.
