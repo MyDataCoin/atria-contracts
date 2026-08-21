@@ -122,7 +122,9 @@ contract DeployTest is Test {
         assertEq(token.name(), "ATRIA Property Test");
         assertEq(token.symbol(), "ATRP-T1");
         assertEq(token.decimals(), 2);
-        assertEq(token.maxSupply(), MAX_SUPPLY);
+        // TOKEN_MAX_SUPPLY is a share count; the cap is compared against a minor-unit total supply.
+        assertEq(token.maxSupply(), MAX_SUPPLY * 100);
+        assertEq(token.maxSupply(), MAX_SUPPLY * 10 ** token.decimals());
         assertEq(token.totalSupply(), 0);
         assertEq(token.propertyId(), PROPERTY_ID);
         assertEq(token.collateralCurrency(), "KGS");

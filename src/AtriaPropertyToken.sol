@@ -62,7 +62,9 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     /// @notice ISO code of the currency {CollateralReport.valuation} is denominated in.
     string public collateralCurrency;
 
-    /// @notice Hard cap on total supply — the registered issue size, in whole shares.
+    /// @notice Hard cap on total supply — the registered issue size, in minor units (hundredths of a
+    ///         share), the same unit as {totalSupply} and every balance. 1 000 000 shares is
+    ///         100 000 000 here. The deployment script converts from shares.
     uint256 public maxSupply;
 
     /// @notice Transfer-restriction registry consulted on every mint and transfer.
@@ -98,7 +100,7 @@ contract AtriaPropertyToken is ERC20, AccessControl, Pausable {
     /// @param name_               token name
     /// @param symbol_             token symbol
     /// @param allowlist_          transfer-restriction registry
-    /// @param maxSupply_          registered issue size, in whole shares
+    /// @param maxSupply_          registered issue size, in minor units (see {maxSupply})
     /// @param propertyId_         backend `Property.Id`
     /// @param collateralCurrency_ ISO code the collateral valuation is denominated in
     /// @param admin               DEFAULT_ADMIN_ROLE holder — a multisig, not the deployer EOA.

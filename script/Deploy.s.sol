@@ -42,6 +42,9 @@ contract Deploy is Script {
         bytes32 propertyId;
     }
 
+    /// @dev `AtriaPropertyToken.decimals()`: a share divides into hundredths.
+    uint256 internal constant MINOR_UNITS_PER_SHARE = 100;
+
     function run()
         external
         returns (IdentityRegistry registry, Allowlist allowlist, AtriaPropertyToken token)
@@ -82,7 +85,11 @@ contract Deploy is Script {
         cfg.name = vm.envString("TOKEN_NAME");
         cfg.symbol = vm.envString("TOKEN_SYMBOL");
         cfg.currency = vm.envOr("COLLATERAL_CURRENCY", string("KGS"));
-        cfg.maxSupply = vm.envUint("TOKEN_MAX_SUPPLY");
+        // TOKEN_MAX_SUPPLY is a share count, the number the issue is registered for. The cap is
+        // compared against `totalSupply()`, which counts minor units, so it is converted here — the
+        // two were the same number back when the token had no decimals, and reading the old value as
+        // minor units would silently cap the issue at a hundredth of its registered size.
+        cfg.maxSupply = vm.envUint("TOKEN_MAX_SUPPLY") * MINOR_UNITS_PER_SHARE;
         cfg.propertyId = vm.envOr("PROPERTY_ID", bytes32(0));
 
         _requireIssueIdentity(cfg.propertyId);

@@ -34,8 +34,11 @@ contract CheckDeployment is Script {
         address deployer = vm.envOr("DEPLOYER_ADDRESS", address(0));
 
         ok = _check("decimals == 2", token.decimals() == 2) && ok;
-        ok = _check("maxSupply == TOKEN_MAX_SUPPLY", token.maxSupply() == vm.envUint("TOKEN_MAX_SUPPLY"))
-            && ok;
+        // TOKEN_MAX_SUPPLY is in shares, `maxSupply` in minor units — see Deploy._config.
+        ok = _check(
+            "maxSupply == TOKEN_MAX_SUPPLY",
+            token.maxSupply() == vm.envUint("TOKEN_MAX_SUPPLY") * 10 ** token.decimals()
+        ) && ok;
         ok = _check("propertyId matches", token.propertyId() == vm.envBytes32("PROPERTY_ID")) && ok;
 
         ok = _check("admin holds DEFAULT_ADMIN_ROLE", token.hasRole(token.DEFAULT_ADMIN_ROLE(), admin)) && ok;
